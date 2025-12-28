@@ -1,4 +1,4 @@
-from .tv_manager import main
+from .cli import main
 
 # def main() -> None:
 #     print("Hello from tvmgr!")
