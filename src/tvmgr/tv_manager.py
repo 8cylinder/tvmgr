@@ -14,9 +14,17 @@ try:
 except ModuleNotFoundError:
     print("""
         No module named "smbc", see: https://github.com/hamano/pysmbc.
-        Probably: sudo apt install build-essential pkg-config smbcclient libsmbclient libsmbclient-dev python3-dev
-        and/or: pip3 install pysmbc,
-        or best yet: sudo apt install python3-pysmbc or python3-smbc""")
+
+        To install vip pip or uv, additional libraries need to be installed.
+        > sudo apt install build-essential pkg-config libsmbclient libsmbclient-dev python3-dev
+        > pip3 install pysmbc
+        > uv add pysmbc
+
+        Or install the apt package
+        > apt install python3-smbc
+        To make apt installed packages available to a venv see,
+        https://github.com/astral-sh/uv/issues/1483#issuecomment-1955116742
+    """)
     exit()
 
 import click
