@@ -27,15 +27,10 @@ except ModuleNotFoundError:
     """)
     exit()
 
+import shutil
 import click
-import logging as l
 from pathlib import Path
 from urllib.parse import urlparse
-
-# set up logging -- eg: l.error('This is an error')
-this_file = __file__
-log_file = "{}.log".format(this_file)
-l.basicConfig(format="%(asctime)s -- %(levelname)s -- %(message)s", filename=log_file)
 
 keep_list = ["Deadwood", "Rick and Morty"]
 # convert show list to to names without spaces or underscores so it
@@ -146,10 +141,24 @@ def delete_files(
         prettysize = humanize(size)
         pfilename = Path(filename)
         shortened = os.path.join(*pfilename.parent.parts[-3:])
+        full_path = f"{shortened}/{pfilename.name}"
 
-        fancy_filename = click.style(
-            f"{shortened}/", fg="white", dim=True
-        ) + click.style(pfilename.name, fg="white", underline=False)
+        prefix_len = 9  # "6chars | "
+        available = shutil.get_terminal_size((80, 24)).columns - prefix_len
+        if len(full_path) > available:
+            full_path = full_path[:available - 1] + "…"
+
+        last_slash = full_path.rfind("/")
+        if last_slash >= 0:
+            dir_part = full_path[: last_slash + 1]
+            file_part = full_path[last_slash + 1 :]
+        else:
+            dir_part = ""
+            file_part = full_path
+
+        fancy_filename = click.style(dir_part, fg="white", dim=True) + click.style(
+            file_part, fg="white", underline=False
+        )
 
         click.echo(
             click.style(prettysize.rjust(6), fg="blue")

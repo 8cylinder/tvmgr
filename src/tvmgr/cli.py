@@ -162,11 +162,11 @@ def viadb(
     """Delete using the Kodi db and SMBC.
 
     This program reads a kodi database and deletes the watched files
-    listed, if they are on an SMB share.
+    listed if they are on an SMB share.
 
-    Its recomended to run Kodi's "Clean library" in settings before
+    It's recommended to run Kodi's "Clean library" in settings before
     reading the db.  This will prevent "File does not exist" errors if
-    some of the video files have been manualy deleted.
+    some of the video files have been manually deleted.
 
     KODI-DATABASE - The location of the kodi userdata video db. The db
     filename changes on xbmc upgrades, and will look like
@@ -209,11 +209,25 @@ def cleanup(roots: list[Path], show: str, null_terminate: bool) -> None:
     """list dirs that do or don't have any video files in them.
 
     \b
+    To show the contents of empty dirs:
+      while read line; do
+        tree "$line";
+      done < <(tvmgr cleanup --show=e *) | less
+
+    \b
+    To delete the empty dirs:
+      while read file; do
+        echo trash "$file";
+      done < <(tvmgr cleanup --show=e *)
+
+    \b
     To see a list of used file types in a directory tree.
     All dirs:
       find -type f -exec basename {} \\; | sed 's/^.*\\.//' | sort | uniq -c | sort -n
-    Dirs with no video files:
-      tv--delete-watched-shows cleanup --show=e * --null \\
+
+    \b
+    Show dirs with no video files:
+      tvmgr cleanup --show=e * --null \\
       | xargs -0 -I"@" find "@" -type f -exec basename {} \\; \\
       | sed 's/^.*\\.//' \\
       | sort \\
@@ -221,19 +235,7 @@ def cleanup(roots: list[Path], show: str, null_terminate: bool) -> None:
 
     \b
     To see the total size of all the dirs with no video files:
-      tv--delete-watched-shows cleanup --show=e * --null | xargs -0 du -hsc | tail -n 1
-
-    \b
-    To show the contents of empty dirs:
-      while read line; do
-        tree "$line";
-      done < <(tv--delete-watched-shows cleanup --show=e *) | less
-
-    \b
-    To delete the empty dirs:
-      while read file; do
-        echo trash "$file";
-      done < <(tv--delete-watched-shows cleanup --show=e *)
+      tvmgr cleanup --show=e * --null | xargs -0 du -hsc | tail -n 1
     """
 
     end = "\0" if null_terminate else "\n"
