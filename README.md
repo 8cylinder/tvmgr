@@ -257,8 +257,9 @@ Serve it locally with live reload:
 make docs-serve
 ```
 
-The published site is <https://8cylinder.github.io/tvmgr/>. `README.md` is
-the manually written landing page and is included in the Sphinx site.
+The documentation is built locally only; it is not published to GitHub Pages.
+`README.md` is the manually written landing page and is included in the Sphinx
+site.
 
 ## Development
 
