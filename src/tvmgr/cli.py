@@ -1,48 +1,142 @@
-#!/usr/bin/env python3
-
 """CLI interface for tvmgr using Click."""
 
-import sys
-import json
+from __future__ import annotations
+
 import sqlite3
-import click
+import sys
+from dataclasses import dataclass
+from importlib.metadata import version as package_version
 from pathlib import Path
-import requests
+from typing import Any, cast
 
+import click
+from rich.markup import escape
+
+from .completions import install_bash_completion
+from .config import Config, ConfigError, config_path, load_config
+from .discover import discover_kodi
+from .kodi import KodiError, get_kodi_info, get_watched_media
 from .tv_manager import (
+    SmbUnavailableError,
     delete_files,
-    walk_bottom_up,
     sql,
+    walk_bottom_up,
 )
-from .discover import (
-    discover_kodi,
-    get_kodi_info,
+from .ui import Ui, make_ui
+
+CONTEXT_SETTINGS = {"token_normalize_func": str.lower}
+
+
+class _HelpOptions:
+    """Give every command the same help option names."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
+        context_settings = dict(kwargs.pop("context_settings", {}) or {})
+        context_settings.setdefault("help_option_names", ["-h", "--help"])
+        super().__init__(*args, context_settings=context_settings, **kwargs)  # ty: ignore[unknown-argument]
+
+
+class AppCommand(_HelpOptions, click.Command):
+    """A leaf command with `-h` support."""
+
+
+class AppGroup(_HelpOptions, click.Group):
+    """A command group with `-h` support and shared command classes."""
+
+    command_class = AppCommand
+    group_class = type
+
+
+@dataclass(frozen=True)
+class AppContext:
+    """Values shared by all subcommands."""
+
+    config: Config
+    ui: Ui
+
+
+def config_callback(
+    ctx: click.Context,
+    _param: click.Parameter,
+    value: bool,
+) -> None:
+    """Print the config path and exit."""
+    if not value or ctx.resilient_parsing:
+        return
+    click.echo(config_path())
+    ctx.exit()
+
+
+def completions_callback(
+    ctx: click.Context,
+    _param: click.Parameter,
+    value: bool,
+) -> None:
+    """Write bash completions and exit."""
+    if not value or ctx.resilient_parsing:
+        return
+    install_bash_completion(
+        cast(click.Group, ctx.command),
+        ctx.info_name or "tvmgr",
+        package_version("tvmgr"),
+    )
+    ctx.exit()
+
+
+@click.group(
+    "tvmgr",
+    cls=AppGroup,
+    no_args_is_help=True,
+    context_settings=CONTEXT_SETTINGS,
 )
+@click.version_option(package_name="tvmgr", prog_name="tvmgr")
+@click.option(
+    "--color",
+    type=click.Choice(["auto", "always", "never"], case_sensitive=False),
+    default="auto",
+    show_default=True,
+    help="Control colored output.",
+)
+@click.option(
+    "--config",
+    is_flag=True,
+    is_eager=True,
+    expose_value=False,
+    callback=config_callback,
+    help="Print the config file path and exit.",
+)
+@click.option(
+    "--completions",
+    is_flag=True,
+    is_eager=True,
+    expose_value=False,
+    callback=completions_callback,
+    help="Write bash completions and exit.",
+)
+@click.pass_context
+def main(ctx: click.Context, color: str) -> None:
+    """Manage TV shows and movies on Kodi media centers."""
+    try:
+        config = load_config(warn=lambda message: click.echo(message, err=True))
+    except ConfigError as exc:
+        raise click.ClickException(str(exc)) from exc
 
-CONTEXT_SETTINGS = {
-    "help_option_names": ["-h", "--help"],
-    "token_normalize_func": lambda x: x.lower(),
-}
+    ui = make_ui(color)
+    ctx.color = {"always": True, "never": False, "auto": None}[color]
+    ctx.obj = AppContext(config=config, ui=ui)
 
 
-@click.group(context_settings=CONTEXT_SETTINGS)
-def main() -> None:
-    pass
-
-
-@main.command(context_settings=CONTEXT_SETTINGS)
+@main.command()
 @click.argument("ip-address")
 @click.option(
-    "--real", is_flag=True, help="Delete files for real instead of listing them."
+    "--real",
+    is_flag=True,
+    help="Delete files for real instead of listing them.",
 )
 @click.option("-v", "--verbose", is_flag=True, help="Give more information.")
-@click.option("--hide-deleted", is_flag=True, help="Don't display missing files.")
-# @click.option(
-#     "--smbc/--mount",
-#     "use_smbc",
-#     default=True,
-#     help="Access files via smbc or a mounted dir (default smbc).",
-# )
+@click.option(
+    "--hide-deleted", is_flag=True, help="Don't display missing files."
+)
 @click.option(
     "-t/-m",
     "--tv/--movies",
@@ -50,19 +144,20 @@ def main() -> None:
     default=True,
     help="Delete tv shows or movies (default tv).",
 )
+@click.pass_obj
 def viajson(
+    app: AppContext,
     ip_address: str,
     real: bool,
     verbose: bool,
     hide_deleted: bool,
-    # use_smbc: bool,
     is_tv: bool,
 ) -> None:
-    """Delete using JSON-RCP and SMBC.
+    """Delete using JSON-RPC and SMBC.
 
-    Retrieve data from Kodi via it's json api.
+    Retrieve data from Kodi via its JSON API.
 
-    JSON-RCP must be enabled.  See https://kodi.wiki/view/JSON-RPC_API
+    JSON-RPC must be enabled. See https://kodi.wiki/view/JSON-RPC_API
     for details.
 
     HTTP: In System/Settings/Network/Services activate Allow control
@@ -73,10 +168,8 @@ def viajson(
     programs on other systems to control Kodi for access from other
     computers as well
 
-    settings/services/control: xxx
-
     \b
-    To get the sheild's ip address:
+    To get the shield's ip address:
     Settings > Device preferences > About > status > Ip address
 
     \b
@@ -91,86 +184,62 @@ def viajson(
       username: sm
       password: Password123
     """
-
-    endpoint = f"http://{ip_address}:8080/jsonrpc"
-    media_type = "tv" if is_tv else "movies"
-    media_types = {
-        "tv": [
-            "VideoLibrary.GetEpisodes",
-            "showtitle",
-            "episodes",
-            "showtitle",
-        ],
-        "movies": [
-            "VideoLibrary.GetMovies",
-            "originaltitle",
-            "movies",
-            "originaltitle",
-        ],
-    }
-
-    kodi_data = {
-        "jsonrpc": "2.0",
-        "method": media_types[media_type][0],
-        "params": {
-            "properties": [
-                media_types[media_type][1],
-                "file",
-            ],
-            "filter": {
-                "field": "playcount",
-                "operator": "greaterthan",
-                "value": "0",
-            },
-        },
-        "id": "get-watched-episodes",
-    }
-    kodi_json = json.dumps(kodi_data)
-    payload = {"request": kodi_json}
-
     try:
-        r = requests.get(endpoint, payload)
-    except requests.exceptions.ConnectionError:
-        print(f"url: {endpoint}")
-        sys.exit("Network is unreachable")
+        file_names = get_watched_media(ip_address, is_tv, app.config)
+        delete_files(
+            file_names,
+            hide_deleted,
+            real,
+            True,
+            verbose,
+            app.config,
+            app.ui,
+        )
+    except (KodiError, SmbUnavailableError) as exc:
+        raise click.ClickException(str(exc)) from exc
 
-    result = r.json()
 
-    episodes = result["result"][media_types[media_type][2]]
-
-    file_names = [(i["file"], i[media_types[media_type][3]]) for i in episodes]
-    use_smbc = True
-    delete_files(file_names, hide_deleted, real, use_smbc, verbose)
-
-
-@main.command(context_settings=CONTEXT_SETTINGS)
-@click.argument("kodi-database", type=click.Path(exists=True, resolve_path=True))
+@main.command()
+@click.argument(
+    "kodi-database",
+    type=click.Path(exists=True, resolve_path=True, path_type=Path),
+)
 @click.option(
-    "--real", is_flag=True, help="Delete files for real instead of listing them."
+    "--real",
+    is_flag=True,
+    help="Delete files for real instead of listing them.",
 )
 @click.option("-v", "--verbose", is_flag=True, help="Give more information.")
-@click.option("--hide-deleted", is_flag=True, help="Don't display missing files.")
+@click.option(
+    "--hide-deleted", is_flag=True, help="Don't display missing files."
+)
 @click.option(
     "--smbc/--mount",
     "use_smbc",
     default=True,
     help="Access files via smbc or a mounted dir (default smbc).",
 )
+@click.pass_obj
 def viadb(
-    kodi_database: Path, real: bool, verbose: bool, hide_deleted: bool, use_smbc: bool
+    app: AppContext,
+    kodi_database: Path,
+    real: bool,
+    verbose: bool,
+    hide_deleted: bool,
+    use_smbc: bool,
 ) -> None:
-    """Delete using the Kodi db and SMBC.
+    """Delete using the Kodi database and SMBC.
 
     This program reads a kodi database and deletes the watched files
     listed if they are on an SMB share.
 
     It's recommended to run Kodi's "Clean library" in settings before
-    reading the db.  This will prevent "File does not exist" errors if
+    reading the db. This will prevent "File does not exist" errors if
     some of the video files have been manually deleted.
 
     KODI-DATABASE - The location of the kodi userdata video db. The db
     filename changes on xbmc upgrades, and will look like
-    myVideos60.db or myVideos20.db etc...  Use the highest numbered one.
+    myVideos60.db or myVideos20.db etc... Use the highest numbered one.
 
     \b
     The location of the kodi db:
@@ -182,15 +251,32 @@ def viadb(
     iOS       | /private/var/mobile/Library/Preferences/Kodi/userdata/
     LibreELEC | /storage/.kodi/userdata/
     """
+    connection = sqlite3.connect(str(kodi_database))
+    try:
+        cursor = connection.cursor()
+        data = cursor.execute(sql)
+        try:
+            delete_files(
+                data,
+                hide_deleted,
+                real,
+                use_smbc,
+                verbose,
+                app.config,
+                app.ui,
+            )
+        except SmbUnavailableError as exc:
+            raise click.ClickException(str(exc)) from exc
+    finally:
+        connection.close()
 
-    conn = sqlite3.connect(kodi_database)
-    curs = conn.cursor()
-    data = curs.execute(sql)
-    delete_files(data, hide_deleted, real, use_smbc, verbose)
 
-
-@main.command(context_settings=CONTEXT_SETTINGS)
-@click.argument("roots", type=click.Path(exists=True), nargs=-1)
+@main.command()
+@click.argument(
+    "roots",
+    type=click.Path(exists=True, path_type=Path),
+    nargs=-1,
+)
 @click.option(
     "--null",
     "-0",
@@ -205,8 +291,14 @@ def viadb(
     default="e",
     help="Show (e)mpty dirs, (f)ull dirs, or (b)oth.",
 )
-def cleanup(roots: list[Path], show: str, null_terminate: bool) -> None:
-    """list dirs that do or don't have any video files in them.
+@click.pass_obj
+def cleanup(
+    app: AppContext,
+    roots: tuple[Path, ...],
+    show: str,
+    null_terminate: bool,
+) -> None:
+    """List dirs that do or don't have any video files in them.
 
     \b
     To show the contents of empty dirs:
@@ -237,10 +329,7 @@ def cleanup(roots: list[Path], show: str, null_terminate: bool) -> None:
     To see the total size of all the dirs with no video files:
       tvmgr cleanup --show=e * --null | xargs -0 du -hsc | tail -n 1
     """
-
-    end = "\0" if null_terminate else "\n"
-
-    video_files = [
+    video_files = {
         ".mp4",
         ".mkv",
         ".avi",
@@ -250,29 +339,48 @@ def cleanup(roots: list[Path], show: str, null_terminate: bool) -> None:
         ".flv",
         ".wmv",
         ".iso",
-    ]
+    }
     for root in roots:
-        if walk_bottom_up(str(root), video_types=set(video_files)):
-            if show in ["e", "b"]:
-                click.secho(f"{root}{end}", fg="red", nl=False)
-        else:
-            if show in ["f", "b"]:
-                click.secho(f"{root}{end}", fg="green", nl=False)
+        is_empty = walk_bottom_up(str(root), video_types=video_files)
+        if is_empty and show in ["e", "b"]:
+            _print_cleanup_path(app.ui, root, null_terminate, "red")
+        elif not is_empty and show in ["f", "b"]:
+            _print_cleanup_path(app.ui, root, null_terminate, "green")
 
 
-@main.command(context_settings=CONTEXT_SETTINGS)
+def _print_cleanup_path(
+    ui: Ui,
+    root: Path,
+    null_terminate: bool,
+    color: str,
+) -> None:
+    if null_terminate:
+        sys.stdout.write(f"{root}\0")
+    else:
+        ui.out.print(f"[{color}]{escape(str(root))}[/{color}]", soft_wrap=True)
+
+
+@main.command()
 @click.option(
     "--network",
     multiple=True,
-    help="Network to scan in CIDR notation. Can be specified multiple times. Default: 192.168.0.0/24 and 192.168.1.0/24",
+    help=(
+        "Network to scan in CIDR notation. Can be specified multiple "
+        "times. Default: 192.168.0.0/24 and 192.168.1.0/24"
+    ),
 )
 @click.option(
     "--timeout",
-    default=0.5,
+    default=None,
     type=float,
     help="Timeout for connection attempts in seconds (default: 0.5).",
 )
-def discover(network: tuple[str], timeout: float) -> None:
+@click.pass_obj
+def discover(
+    app: AppContext,
+    network: tuple[str, ...],
+    timeout: float | None,
+) -> None:
     """Discover Kodi devices on the network.
 
     Scans the specified network(s) for devices running Kodi and displays
@@ -288,71 +396,71 @@ def discover(network: tuple[str], timeout: float) -> None:
       tvmgr discover --network 192.168.0.0/24 --network 192.168.1.0/24
       tvmgr discover --network 10.0.0.0/24 --timeout 1.0
     """
+    networks = list(network) if network else list(app.config.discover.networks)
+    scan_timeout = (
+        timeout if timeout is not None else app.config.discover.timeout
+    )
+    network_str = ", ".join(networks)
 
-    # Convert tuple to list, or use None for defaults
-    networks = list(network) if network else None
+    app.ui.out.print(f"Scanning {escape(network_str)} for Kodi devices...")
+    app.ui.out.print()
 
-    # Display which networks are being scanned
-    if networks:
-        network_str = ", ".join(networks)
-    else:
-        network_str = "192.168.0.0/24, 192.168.1.0/24"
-
-    click.echo(f"Scanning {network_str} for Kodi devices...")
-    click.echo()
-
-    devices = discover_kodi(networks, timeout)
+    devices = discover_kodi(networks, scan_timeout)
 
     if not devices:
-        click.secho("No Kodi devices found on the network.", fg="yellow")
+        app.ui.out.print(
+            "[yellow]No Kodi devices found on the network.[/yellow]"
+        )
         return
 
-    click.secho(f"Found {len(devices)} Kodi device(s):\n", fg="green", bold=True)
+    app.ui.out.print(f"[green]Found {len(devices)} Kodi device(s):[/green]\n")
 
     for ip in devices:
-        click.echo(click.style(f"Device: {ip}", fg="cyan", bold=True))
+        app.ui.out.print(f"[cyan bold]Device: {escape(ip)}[/cyan bold]")
+        info = get_kodi_info(ip, app.config)
 
-        info = get_kodi_info(ip)
+        system = info.get("system")
+        if isinstance(system, dict):
+            app.ui.out.print("\n[blue bold]System Information:[/blue bold]")
+            name = escape(str(system.get("name", "Unknown")))
+            version = escape(str(system.get("version", "Unknown")))
+            volume = escape(str(system.get("volume", 0)))
+            url = escape(str(info["url"]))
+            app.ui.out.print(f"  Name:    {name}")
+            app.ui.out.print(f"  Version: {version}")
+            app.ui.out.print(f"  Volume:  {volume}%")
+            app.ui.out.print(f"  URL:     {url}")
 
-        # Display system information
-        if info.get("system"):
-            sys_info = info["system"]
-            click.echo(click.style("\nSystem Information:", fg="blue", bold=True))
-            click.echo(f"  Name:    {sys_info.get('name', 'Unknown')}")
-            click.echo(f"  Version: {sys_info.get('version', 'Unknown')}")
-            click.echo(f"  Volume:  {sys_info.get('volume', 0)}%")
-            click.echo(f"  URL:     {info['url']}")
+        library = info.get("library")
+        if isinstance(library, dict):
+            app.ui.out.print("\n[blue bold]Library Statistics:[/blue bold]")
+            tv_shows = escape(str(library.get("tv_shows", 0)))
+            episodes = escape(str(library.get("episodes", 0)))
+            movies = escape(str(library.get("movies", 0)))
+            app.ui.out.print(f"  TV Shows: {tv_shows}")
+            app.ui.out.print(f"  Episodes: {episodes}")
+            app.ui.out.print(f"  Movies:   {movies}")
 
-        # Display library statistics
-        if info.get("library"):
-            lib_info = info["library"]
-            click.echo(click.style("\nLibrary Statistics:", fg="blue", bold=True))
-            click.echo(f"  TV Shows: {lib_info.get('tv_shows', 0)}")
-            click.echo(f"  Episodes: {lib_info.get('episodes', 0)}")
-            click.echo(f"  Movies:   {lib_info.get('movies', 0)}")
-
-        # Display player status
-        if info.get("player"):
-            player_info = info["player"]
-            click.echo(click.style("\nPlayer Status:", fg="blue", bold=True))
-            if player_info.get("active"):
-                click.echo(
-                    f"  Playing: {player_info.get('playing', 'Unknown')} "
-                    f"({player_info.get('type', 'unknown')})"
-                )
+        player = info.get("player")
+        if isinstance(player, dict):
+            app.ui.out.print("\n[blue bold]Player Status:[/blue bold]")
+            if player.get("active"):
+                playing = escape(str(player.get("playing", "Unknown")))
+                media_type = escape(str(player.get("type", "unknown")))
+                app.ui.out.print(f"  Playing: {playing} ({media_type})")
             else:
-                click.echo("  Status:  Idle")
+                app.ui.out.print("  Status:  Idle")
 
-        # Display add-ons info
-        if info.get("addons"):
-            addons_info = info["addons"]
-            click.echo(click.style("\nAdd-ons:", fg="blue", bold=True))
-            click.echo(f"  Video Add-ons: {addons_info.get('video_addons', 0)}")
+        addons = info.get("addons")
+        if isinstance(addons, dict):
+            app.ui.out.print("\n[blue bold]Add-ons:[/blue bold]")
+            video_addons = escape(str(addons.get("video_addons", 0)))
+            app.ui.out.print(f"  Video Add-ons: {video_addons}")
 
-        # Display any errors
-        if info.get("error"):
-            click.echo(
-                click.style(f"\nError gathering info: {info['error']}", fg="red")
+        error = info.get("error")
+        if error:
+            app.ui.out.print(
+                f"\n[red]Error gathering info: {escape(str(error))}[/red]"
             )
 
-        click.echo()
+        app.ui.out.print()

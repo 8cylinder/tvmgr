@@ -1,21 +1,71 @@
 [project]
 name = "tvmgr"
-version = "0.1.0"
-description = "Manage tv shows"
+version = "0.2.0"
+description = "Manage TV shows"
 readme = "README.md"
 authors = [
     { name = "Sheldon McGrandle", email = "developer@8cylinder.com" }
 ]
+license = "GPL-2.0-only"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     "click>=8.3.1",
+    "platformdirs>=4.3.6",
     "pysmbc>=1.0.25.1",
     "requests>=2.32.5",
+    "rich>=13.9.4",
 ]
 
 [project.scripts]
-tvmgr = "tvmgr:main"
+tvmgr = "tvmgr.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/8cylinder/tvmgr"
+Repository = "https://github.com/8cylinder/tvmgr"
+Issues = "https://github.com/8cylinder/tvmgr/issues"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-cov>=6",
+    "ruff",
+    "ty",
+    "sphinx>=9",
+    "sphinx-click>=6",
+    "furo",
+    "myst-parser",
+    "sphinx-autobuild",
+]
 
 [build-system]
-requires = ["uv_build>=0.9.18,<0.10.0"]
+requires = ["uv_build>=0.9.18,<0.14"]
 build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 80
+target-version = "py311"
+
+[tool.ruff.lint]
+extend-select = ["ANN", "PGH003", "PYI"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ANN", "RUF012"]
+
+[tool.ty.rules]
+dynamic-function-decorator-return = "error"
+missing-type-argument = "error"
+possibly-unresolved-reference = "warn"
+unsound-return = "error"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config --cov=tvmgr --cov-branch --cov-report=term-missing"
+
+[tool.coverage.run]
+branch = true
+source = ["tvmgr"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true

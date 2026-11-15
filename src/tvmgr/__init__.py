@@ -1,6 +1,1 @@
-from .cli import main
-
-# def main() -> None:
-#     print("Hello from tvmgr!")
-
-main()
+"""tvmgr manages TV shows and movies on Kodi media centers."""

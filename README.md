@@ -1,38 +1,46 @@
 # tvmgr
 
-A Python CLI tool for managing TV shows and movies on Kodi media
-centers. Automatically deletes watched episodes and movies from SMB
-shares or mounted directories to free up storage space.
+Manage TV shows and movies on Kodi media centers. `tvmgr` deletes watched
+episodes and movies from SMB shares or mounted directories to free up
+storage, with a configurable keep list to protect specific shows.
 
-## Features
+[![License: GPL-2.0-only](https://img.shields.io/badge/license-GPL--2.0--only-blue.svg)](https://github.com/8cylinder/tvmgr/blob/main/LICENSE)
 
-- **Network Discovery**: Scan your network to find Kodi devices
-- **Multiple Access Modes**: Connect via JSON-RPC API or local database
-- **Smart Deletion**: Only removes watched content, preserves unwatched
-- **Keep Lists**: Protect specific shows from deletion
-- **Flexible Storage**: Works with SMB shares or mounted directories
-- **Directory Cleanup**: Find and clean up empty media directories
+Repository: <https://github.com/8cylinder/tvmgr>
 
 ## Requirements
 
-### System Dependencies
+- Python 3.11 or newer.
+- Linux or macOS.
+- A C compiler, `pkg-config`, and the SMB client development libraries.
+  `pysmbc` is a C extension and is compiled during installation.
+- bash 4.4 or newer for bash completions.
+- bash-completion 2.18 or newer for automatic completion loading.
 
-Before installing, you need the SMB client development libraries:
+### System dependencies
 
 **Ubuntu/Debian:**
+
 ```bash
-sudo apt-get install libsmbclient-dev
+sudo apt-get update
+sudo apt-get install build-essential pkg-config libsmbclient-dev
 ```
 
 **Fedora/RHEL:**
+
 ```bash
-sudo dnf install libsmbclient-devel
+sudo dnf install gcc make pkgconf-pkg-config libsmbclient-devel
 ```
 
 **macOS:**
+
 ```bash
-brew install samba
+xcode-select --install
+brew install samba pkg-config
 ```
+
+`make sync` uses `clang` when it is installed and falls back to `gcc`.
+Override the choice with `make SMBC_CC=gcc sync`.
 
 ## Installation
 
@@ -45,164 +53,243 @@ management.
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-### Install Dependencies
+### From source
 
 ```bash
-uv sync
+git clone https://github.com/8cylinder/tvmgr.git
+cd tvmgr
+make sync
+make install
 ```
 
-This will install all required dependencies including click, pysmbc,
-and requests.
+`make install` installs the `tvmgr` command, bash completions, and the man
+page. All install targets are user-level and do not require `sudo`.
 
-## Build
-
-To build a distributable package:
+To install only the command with uv:
 
 ```bash
-uv build
+uv tool install --editable .
 ```
 
-This creates wheel and source distributions in the `dist/` directory.
+## Quick start
 
-## Usage
-
-Run commands using `uv run`:
+Scan the default networks for Kodi devices:
 
 ```bash
-uv run tvmgr --help
+tvmgr discover
 ```
 
-Or install and use the `tvmgr` command directly:
+List the watched files on a Kodi device without deleting anything:
 
 ```bash
-uv tool install -e .
+tvmgr viajson 192.168.1.100
+```
+
+Delete the files after confirming the list:
+
+```bash
+tvmgr viajson 192.168.1.100 --real
+```
+
+## Command reference
+
+Show help for the root command or any subcommand:
+
+```bash
 tvmgr --help
+tvmgr -h
+tvmgr viadb --help
 ```
 
-### Commands
+### Global options
 
-#### Discover Kodi Devices
+| Option | Description |
+| --- | --- |
+| `-h`, `--help` | Show help and exit. |
+| `--version` | Show the version and exit. |
+| `--color [auto\|always\|never]` | Control colored output. Default: `auto`. |
+| `--config` | Print the config file path and exit. |
+| `--completions` | Write bash completions and exit. |
 
-Scan your network to find Kodi devices:
+Global options must appear before the subcommand.
 
-```bash
-# Scan default networks (192.168.0.0/24 and 192.168.1.0/24)
-uv run tvmgr discover
+### `tvmgr discover`
 
-# Scan custom network
-uv run tvmgr discover --network 10.0.0.0/24
+Scan networks for Kodi devices and print system, library, player, and add-on
+information.
 
-# Scan multiple networks
-uv run tvmgr discover --network 192.168.0.0/24 --network 10.0.0.0/24
-```
+| Option | Description |
+| --- | --- |
+| `--network CIDR` | Network to scan. Repeat for multiple networks. Default: `192.168.0.0/24` and `192.168.1.0/24`. |
+| `--timeout SECONDS` | Connection timeout. Default: `0.5`. |
 
-Displays detailed information about each Kodi device found:
-- Device name and version
-- Library statistics (shows, episodes, movies)
-- Current playback status
-- System capabilities
+### `tvmgr viajson IP-ADDRESS`
 
-#### Delete via JSON-RPC API
+Read watched media from Kodi's JSON-RPC API and delete the files over SMB.
 
-Connect to a Kodi device and delete watched content via its JSON-RPC
-API:
+| Option | Description |
+| --- | --- |
+| `--real` | Delete files instead of only listing them. |
+| `-v`, `--verbose` | Print extra detail. |
+| `--hide-deleted` | Do not print files that no longer exist. |
+| `-t`, `--tv` | Process TV episodes. This is the default. |
+| `-m`, `--movies` | Process movies. |
 
-```bash
-uv run tvmgr viajson 192.168.1.100
-```
+JSON-RPC must be enabled in Kodi. See
+<https://kodi.wiki/view/JSON-RPC_API> for details.
 
-This command:
-1. Connects to Kodi at the specified IP address (port 8080)
-2. Queries for watched episodes and movies
-3. Deletes the files via SMB protocol
+### `tvmgr viadb KODI-DATABASE`
 
-#### Delete via Database
+Read watched media from a local Kodi video database and delete the files.
 
-Use a local Kodi database file to identify watched content:
+| Option | Description |
+| --- | --- |
+| `--real` | Delete files instead of only listing them. |
+| `-v`, `--verbose` | Print extra detail. |
+| `--hide-deleted` | Do not print files that no longer exist. |
+| `--smbc`, `--mount` | Access files over SMB (default) or through a mounted directory. |
 
-```bash
-uv run tvmgr viadb /path/to/MyVideos119.db
-```
+Run Kodi's "Clean library" before reading the database so stale entries do
+not produce "File does not exist" messages.
 
-This command:
-1. Reads the Kodi SQLite database directly
-2. Identifies watched content
-3. Deletes files via SMB or mounted directory
+### `tvmgr cleanup ROOTS...`
 
-#### Clean Up Directories
+List directories that do or do not contain video files.
 
-Find and optionally clean up empty media directories:
+| Option | Description |
+| --- | --- |
+| `-0`, `--null` | Separate output with NUL characters instead of newlines. |
+| `-s`, `--show {e,f,b}` | Show (e)mpty directories, (f)ull directories, or (b)oth. Default: `e`. |
 
-```bash
-# Scan one or more root directories
-uv run tvmgr cleanup /home/sm/net1/TV /home/sm/net1/Movies
-```
-
-Lists directories that:
-- Have video files (preserved)
-- Don't have video files (candidates for removal)
-
-Supported video formats: .mp4, .mkv, .avi, .mpg, .mpeg, .mov, .flv,
-.wmv, .iso
+Supported video extensions: `.mp4`, `.mkv`, `.avi`, `.mpg`, `.mpeg`, `.mov`,
+`.flv`, `.wmv`, `.iso`.
 
 ## Configuration
 
-### Kodi Connection
+Run `tvmgr --config` to print the configuration path. On Linux this is
+`~/.config/tvmgr/config.toml`; macOS uses the platform application-support
+directory.
 
-Default connection settings for JSON-RPC:
-- Port: 8080
-- Username: kodi
-- Password: (none)
+A missing file is not an error and built-in defaults are used. Invalid TOML
+is an error and is reported with the file path. Unknown keys produce a
+warning on stderr.
 
-### SMB Authentication
+```toml
+# ~/.config/tvmgr/config.toml
+keep_list = ["Deadwood", "Rick and Morty"]
 
-Default SMB credentials are hard-coded in `tv_manager.py`:
-- Username: sm
-- Password: Password123
+[kodi]
+port = 8080
+username = "kodi"
+password = ""
 
-Edit the `auth_fn()` function to change these credentials.
+[smb]
+username = "sm"
+password = "Password123"
+workgroup = ""
 
-### Keep List
+[paths]
+smbc_drive = "/Volume_1"
+mount_base = "/home/sm/net1"
 
-Protect specific shows from deletion by editing the `keep_list` in
-`tv_manager.py`:
-
-```python
-keep_list = [
-    "Show Name",
-    "Another Show",
-]
+[discover]
+networks = ["192.168.0.0/24", "192.168.1.0/24"]
+timeout = 0.5
 ```
 
-Show names are normalized (spaces/underscores removed, lowercased) for
-matching.
+Precedence is command-line option, then configuration value, then built-in
+default. Relative paths in the configuration are resolved against the
+configuration file's directory. The configuration file may contain
+credentials; restrict its permissions if needed.
 
-### Path Mapping
+## Bash completions
 
-For mounted directories instead of SMB, configure path translation in
-`ShowFile.__init__()` in `tv_manager.py`:
+Generate the static completion script:
 
-```python
-smbc://server/Volume_1/...  →  /home/sm/net1/...
+```bash
+tvmgr --completions
 ```
+
+The command prints the absolute path and writes the script to
+`bash-completion/completions/tvmgr.bash` under `BASH_COMPLETION_USER_DIR`,
+`XDG_DATA_HOME`, or `~/.local/share`, in that order. Source it in the current
+shell with:
+
+```bash
+source ~/.local/share/bash-completion/completions/tvmgr.bash
+```
+
+The script requires bash 4.4 or newer. Automatic loading requires
+bash-completion 2.18 or newer, which prefers the `.bash` suffix. macOS
+`/bin/bash` is version 3.2; install a newer bash with
+`brew install bash` or use `tvmgr --completions` from that shell. zsh is not
+supported. Rerun `tvmgr --completions` after changing commands or options.
+
+## Man page
+
+Build the man page:
+
+```bash
+make man
+```
+
+View it without installing:
+
+```bash
+man -l docs/_build/man/tvmgr.1
+```
+
+`make install-man` installs it to
+`$XDG_DATA_HOME/man/man1/tvmgr.1` (or `~/.local/share/man/man1`). If
+`man tvmgr` cannot find the page, add that directory to `MANPATH`.
+
+## Documentation website
+
+Build the HTML documentation:
+
+```bash
+make docs
+```
+
+Serve it locally with live reload:
+
+```bash
+make docs-serve
+```
+
+The published site is <https://8cylinder.github.io/tvmgr/>. `README.md` is
+the manually written landing page and is included in the Sphinx site.
 
 ## Development
 
-### Project Structure
+```bash
+make sync       # install dependencies
+make fmt        # format
+make lint       # lint and apply safe fixes
+make type       # type-check
+make test       # run tests
+make check      # run all checks without changing files
+make build      # build wheel and sdist into dist/
+```
 
-- `src/tvmgr/cli.py` - Click-based CLI interface
-- `src/tvmgr/tv_manager.py` - Core deletion and file management logic
-- `src/tvmgr/discover.py` - Network scanning and Kodi discovery
-
-### Running Tests
+Run a single test:
 
 ```bash
-uv run pytest
+uv run pytest tests/test_cli.py::test_version
 ```
+
+`make check` runs formatting, linting, type checking, tests, and the Sphinx
+documentation build without modifying source files.
 
 ## License
 
-See LICENSE file for details.
+`tvmgr` is licensed under GPL-2.0-only. See [LICENSE](https://github.com/8cylinder/tvmgr/blob/main/LICENSE).
+
+Copyright (C) 2026 Sheldon McGrandle
+
+## Contributing and issues
+
+Report issues at <https://github.com/8cylinder/tvmgr/issues>.
 
 ## Author
 

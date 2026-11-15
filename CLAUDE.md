@@ -1,124 +1,100 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when
-working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working
+with code in this repository.
 
-## Project Overview
+## Project overview
 
 `tvmgr` is a Python CLI tool for managing TV shows and movies on Kodi
-media centers. It deletes watched episodes/movies from SMB shares or
-mounted directories to free up storage space, with configurable
-keep-lists to preserve specific shows.
+media centers. It deletes watched episodes and movies from SMB shares or
+mounted directories to free up storage space, with a configurable keep
+list to preserve specific shows.
 
-## Development Commands
+## Development commands
 
-**Install dependencies:**
+Dependencies are managed with `uv`. Use the Makefile for routine work:
+
 ```bash
-uv sync
+make sync       # install dependencies
+make fmt        # format
+make lint       # lint and apply safe fixes
+make type       # type-check
+make test       # run tests
+make check      # all checks without changing files
+make build      # wheel and sdist
 ```
 
-**Run the CLI:**
-```bash
-# Via the installed script
-tvmgr --help
+`make sync` selects `clang` when it is installed and falls back to `gcc`
+for building the `pysmbc` C extension. Override it with
+`make SMBC_CC=gcc sync`.
 
-# Or directly with Python
-python -m tvmgr
-```
-
-**Available CLI commands:**
-- `tvmgr discover` - Scan network to find Kodi devices and display detailed info
-  - Default: scans 192.168.0.0/24 and 192.168.1.0/24
-  - Custom: `--network 10.0.0.0/24` (can specify multiple times)
-- `tvmgr viajson <ip-address>` - Delete using Kodi's JSON-RPC API and SMBC
-- `tvmgr viadb <kodi-database>` - Delete using local Kodi database and SMBC
-- `tvmgr cleanup <roots...>` - List directories with/without video files
-
-**Note:** The project uses `uv` as the build system (specified in pyproject.toml).
-All commands must be run with `uv run` (e.g., `uv run tvmgr discover`).
+Run the CLI with `uv run tvmgr ...` or, after `make install`, `tvmgr ...`.
 
 ## Architecture
 
-### Entry Point Flow
+### Entry point
 
-The unusual entry point structure is important to understand:
-- `src/tvmgr/__init__.py` imports and immediately calls `main()` from `cli.py`
-- The CLI is exposed via `[project.scripts]` as `tvmgr = "tvmgr:main"`
-- This means the main function runs on import (unconventional but intentional)
+- `pyproject.toml` maps `tvmgr = "tvmgr.cli:main"`.
+- `src/tvmgr/__init__.py` contains only the package docstring.
+- `src/tvmgr/__main__.py` supports `python -m tvmgr`.
 
-### Core Components
+### Modules
 
-**CLI (cli.py):**
-- Click-based CLI interface with four main commands: `discover`, `viajson`, `viadb`, and `cleanup`
-- All Click decorators, command routing, and UI formatting are here
-- Imports business logic from `tv_manager.py` and `discover.py`
+- `cli.py` — Click command tree, global options, and command dispatch.
+  Keep this layer thin.
+- `config.py` — TOML configuration loading, validation, and defaults.
+- `kodi.py` — Kodi JSON-RPC queries (`viajson` data and `discover` info).
+- `discover.py` — parallel network scanning for Kodi devices.
+- `tv_manager.py` — deletion logic, SMB/local file adapters, and cleanup
+  helpers.
+- `completions.py` — static bash completion generation and installation.
+- `ui.py` — Rich consoles and status helpers.
 
-**TV Manager (tv_manager.py):**
-- Business logic for file operations and deletion
-- `delete_files()` - Core deletion logic that works with both SMBC and local files
-- `ShowFile` class - Adapter that mimics SMBC's API for local filesystem operations
-- Note: Still imports `click` because `delete_files()` uses `click.echo()` for output
+### Command flow
 
-**Discovery (discover.py):**
-- Network scanning to find Kodi devices (port 8080 detection)
-- JSON-RPC communication to verify and query Kodi instances
-- `discover_kodi()` - Scans network(s) in parallel using ThreadPoolExecutor
-  - Accepts single network string, list of networks, or None for defaults
-  - Default networks: ["192.168.0.0/24", "192.168.1.0/24"]
-  - Uses parallel scanning with 100 worker threads for performance
-- `get_kodi_info()` - Gathers comprehensive device information via JSON-RPC API
-  - System info (name, version, volume, capabilities)
-  - Library statistics (TV shows, episodes, movies)
-  - Current player status
-  - Add-on counts
+- `viajson` calls `kodi.get_watched_media()`, then
+  `tv_manager.delete_files()`.
+- `viadb` reads the Kodi SQLite database (using `tv_manager.sql`) and passes
+  the cursor to `delete_files()`.
+- `cleanup` walks directory trees with `walk_bottom_up()`.
+- `discover` scans networks and calls `kodi.get_kodi_info()`.
 
-**Data Sources:**
-1. **JSON-RPC API** (`viajson` command) - Queries Kodi directly over
-   HTTP for watched media
-2. **SQLite Database** (`viadb` command) - Reads Kodi's local video
-   database directly
-3. Both sources feed the same `delete_files()` function
+### Configuration
 
-**File Access Modes:**
-- SMBC mode: Direct SMB protocol access via `pysmbc` library
-- Mount mode: Local filesystem access via `ShowFile` adapter class
-- Path translation in `ShowFile.__init__`:
-  `smbc://server/Volume_1/...` → `/home/sm/net1/...`
+`config.load_config()` reads `~/.config/tvmgr/config.toml` (platform
+dependent) and returns a frozen `Config` object. Precedence is command-line
+option, then config value, then built-in default. The root callback loads it
+once and stores `AppContext(config, ui)` on `ctx.obj`.
 
-### Keep List Mechanism
+The SMB credentials, keep list, path mapping, Kodi connection settings, and
+discover defaults are all configurable. Defaults match the original
+hard-coded behavior.
 
-The `keep_list` global variable (tv_manager.py:37-40) protects
-specific shows from deletion:
-- Strings are normalized (spaces/underscores removed, lowercased) for matching
-- Applied in `delete_files()` before deletion (tv_manager.py:112-116)
+### Output
 
-### Authentication
+All human-facing output goes through the Rich consoles in `ui.py`. Machine
+output (`--version`, `--config`, `--completions`, and `cleanup --null`) must
+stay plain and free of ANSI escapes. Escape dynamic values with
+`rich.markup.escape()` before interpolating them into markup.
 
-Hard-coded credentials in `auth_fn()` (tv_manager.py:86-91):
-- SMB username: "sm"
-- SMB password: "Password123"
-- This is intentional for local network use but should be noted for security
+## Testing
+
+Tests live in `tests/` and use pytest. They must not touch the real home
+directory, network, SMB shares, or system configuration. Use `tmp_path` and
+`monkeypatch`; mock Kodi HTTP calls and SMB contexts. Branch coverage must
+stay at or above 90%.
 
 ## Dependencies
 
-- `click` - CLI framework
-- `pysmbc` - SMB/CIFS protocol support (requires system libraries: libsmbclient-dev)
-- `requests` - HTTP requests for Kodi JSON-RPC API
+- `click` — CLI framework
+- `rich` — terminal output
+- `platformdirs` — per-user config and data paths
+- `pysmbc` — SMB/CIFS support (requires `libsmbclient-dev`)
+- `requests` — Kodi JSON-RPC HTTP requests
 
-The `pysmbc` dependency requires system packages to be installed first
-(see error message in tv_manager.py:15-19).
+`pysmbc` has no wheels; it is compiled during installation and needs a C
+compiler, `pkg-config`, and the SMB client development headers.
 
-## Configuration Points
+## License
 
-**Kodi Connection (JSON-RPC):**
-- Default port: 8080
-- Default credentials: username "kodi", no password
-- Endpoint format: `http://{ip}:8080/jsonrpc`
-
-**Path Mapping:**
-- SMB drive: `/Volume_1` (tv_manager.py:63)
-- Local mount: `/home/sm/net1` (tv_manager.py:64)
-
-**Video File Extensions:** Defined in `cleanup` command
-(tv_manager.py:409-419): .mp4, .mkv, .avi, .mpg, .mpeg, .mov, .flv,
-.wmv, .iso
+GPL-2.0-only. See `LICENSE`.
