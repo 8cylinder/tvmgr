@@ -35,3 +35,6 @@ Thumbs.db
 
 # Local template
 app-base.org
+
+# Local configuration (may contain credentials)
+/config.toml

@@ -62,13 +62,15 @@ Run the CLI with `uv run tvmgr ...` or, after `make install`, `tvmgr ...`.
 ### Configuration
 
 `config.load_config()` reads `~/.config/tvmgr/config.toml` (platform
-dependent) and returns a frozen `Config` object. Precedence is command-line
-option, then config value, then built-in default. The root callback loads it
-once and stores `AppContext(config, ui)` on `ctx.obj`.
+dependent) and returns a frozen `Config` object. There are no built-in
+defaults: every key is required. When the file is missing, `load_config()`
+writes a commented template to `config.config_path()` (mode 0600) and raises
+`ConfigError` asking the user to fill it in. Precedence is command-line
+option, then config value. The root callback loads it once and stores
+`AppContext(config, ui)` on `ctx.obj`.
 
 The SMB credentials, keep list, path mapping, Kodi connection settings, and
-discover defaults are all configurable. Defaults match the original
-hard-coded behavior.
+discover settings are all configured in that file.
 
 ### Output
 

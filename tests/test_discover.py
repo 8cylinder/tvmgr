@@ -87,17 +87,3 @@ def test_discover_kodi_ignores_http_errors(monkeypatch):
 
     assert discover.discover_kodi(["192.168.0.0/30"]) == []
     assert all(sock.closed for sock in FakeSocket.instances)
-
-
-def test_discover_kodi_default_networks(monkeypatch):
-    FakeSocket.instances = []
-    FakeSocket.result = 1
-    monkeypatch.setattr(discover.socket, "socket", lambda *_: FakeSocket())
-    monkeypatch.setattr(
-        discover,
-        "DEFAULT_NETWORKS",
-        ["192.168.0.0/30"],
-    )
-
-    assert discover.discover_kodi(None) == []
-    assert len(FakeSocket.instances) == 4

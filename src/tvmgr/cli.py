@@ -366,14 +366,17 @@ def _print_cleanup_path(
     multiple=True,
     help=(
         "Network to scan in CIDR notation. Can be specified multiple "
-        "times. Default: 192.168.0.0/24 and 192.168.1.0/24"
+        "times. Defaults to [discover] networks in the config file."
     ),
 )
 @click.option(
     "--timeout",
     default=None,
     type=float,
-    help="Timeout for connection attempts in seconds (default: 0.5).",
+    help=(
+        "Timeout for connection attempts in seconds. Defaults to "
+        "[discover] timeout in the config file."
+    ),
 )
 @click.pass_obj
 def discover(
@@ -387,7 +390,8 @@ def discover(
     detailed information about each device found, including system info,
     library statistics, and current playback status.
 
-    By default, scans 192.168.0.0/24 and 192.168.1.0/24.
+    By default, scans the networks listed under [discover] in the config
+    file.
 
     \b
     Examples:

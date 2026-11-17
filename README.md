@@ -120,8 +120,8 @@ information.
 
 | Option | Description |
 | --- | --- |
-| `--network CIDR` | Network to scan. Repeat for multiple networks. Default: `192.168.0.0/24` and `192.168.1.0/24`. |
-| `--timeout SECONDS` | Connection timeout. Default: `0.5`. |
+| `--network CIDR` | Network to scan. Repeat for multiple networks. Defaults to `[discover] networks` in the config file. |
+| `--timeout SECONDS` | Connection timeout. Defaults to `[discover] timeout` in the config file. |
 
 ### `tvmgr viajson IP-ADDRESS`
 
@@ -170,9 +170,10 @@ Run `tvmgr --config` to print the configuration path. On Linux this is
 `~/.config/tvmgr/config.toml`; macOS uses the platform application-support
 directory.
 
-A missing file is not an error and built-in defaults are used. Invalid TOML
-is an error and is reported with the file path. Unknown keys produce a
-warning on stderr.
+The file is required. When it is missing, `tvmgr` writes a commented template
+to that path (mode `0600`), then exits with an error naming the file; fill in
+the values and run the command again. Invalid TOML is an error and is reported
+with the file path. Unknown keys produce a warning on stderr.
 
 ```toml
 # ~/.config/tvmgr/config.toml
@@ -197,10 +198,10 @@ networks = ["192.168.0.0/24", "192.168.1.0/24"]
 timeout = 0.5
 ```
 
-Precedence is command-line option, then configuration value, then built-in
-default. Relative paths in the configuration are resolved against the
-configuration file's directory. The configuration file may contain
-credentials; restrict its permissions if needed.
+Precedence is command-line option, then configuration value. Relative paths in
+the configuration are resolved against the configuration file's directory. The
+configuration file may contain credentials; restrict its permissions if
+needed.
 
 ## Bash completions
 

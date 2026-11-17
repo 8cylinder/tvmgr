@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
+from conftest import CONFIG_TOML, config_toml
 
 from tvmgr import cli
 from tvmgr.cli import main
@@ -19,7 +20,11 @@ def _env(tmp_path: Path) -> dict[str, str]:
     }
 
 
-def _invoke(args, tmp_path, **kwargs):
+def _invoke(args, tmp_path, write_config_file=True, **kwargs):
+    if write_config_file:
+        config_file = tmp_path / "config" / "tvmgr" / "config.toml"
+        if not config_file.exists():
+            _write_config(tmp_path, CONFIG_TOML)
     return CliRunner().invoke(main, args, env=_env(tmp_path), **kwargs)
 
 
@@ -71,12 +76,20 @@ def test_version_stays_plain_when_color_is_forced(tmp_path):
 
 
 def test_config_prints_path_only(tmp_path):
-    result = _invoke(["--config"], tmp_path)
+    result = _invoke(["--config"], tmp_path, write_config_file=False)
     assert result.exit_code == 0
     expected = tmp_path / "config" / "tvmgr" / "config.toml"
     assert result.stdout.strip() == str(expected)
     assert not expected.exists()
     assert "\x1b[" not in result.stdout
+
+
+def test_missing_config_writes_template_and_fails(tmp_path):
+    result = _invoke(["cleanup"], tmp_path, write_config_file=False)
+    assert result.exit_code != 0
+    expected = tmp_path / "config" / "tvmgr" / "config.toml"
+    assert expected.is_file()
+    assert "created a template" in result.output + result.stderr
 
 
 def test_invalid_config_exits_nonzero(tmp_path):
@@ -87,7 +100,7 @@ def test_invalid_config_exits_nonzero(tmp_path):
 
 
 def test_unknown_config_key_warns(tmp_path):
-    _write_config(tmp_path, "unknown = true\n")
+    _write_config(tmp_path, CONFIG_TOML + "\nunknown = true\n")
     result = _invoke(["cleanup"], tmp_path)
     assert result.exit_code == 0
     assert "unknown config key" in result.stderr
@@ -318,15 +331,17 @@ def test_discover_idle_player(monkeypatch, tmp_path):
     assert "Status:  Idle" in result.output
 
 
-def test_discover_uses_config_defaults(monkeypatch, tmp_path):
+def _write_discover_config(tmp_path, networks, timeout):
     _write_config(
         tmp_path,
-        """
-[discover]
-networks = ["10.0.0.0/24"]
-timeout = 1.5
-""",
+        config_toml(
+            {"discover.networks": networks, "discover.timeout": timeout}
+        ),
     )
+
+
+def test_discover_uses_config_values(monkeypatch, tmp_path):
+    _write_discover_config(tmp_path, ["10.0.0.0/24"], 1.5)
     seen = {}
 
     def fake_discover(networks, timeout):
@@ -341,14 +356,7 @@ timeout = 1.5
 
 
 def test_discover_cli_overrides_config(monkeypatch, tmp_path):
-    _write_config(
-        tmp_path,
-        """
-[discover]
-networks = ["10.0.0.0/24"]
-timeout = 1.5
-""",
-    )
+    _write_discover_config(tmp_path, ["10.0.0.0/24"], 1.5)
     seen = {}
 
     def fake_discover(networks, timeout):

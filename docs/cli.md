@@ -20,7 +20,8 @@ mounted directory.
 
 `~/.config/tvmgr/config.toml`
     The per-user configuration file. Run `tvmgr --config` to print the exact
-    path for the current platform.
+    path for the current platform. Every key is required; when the file is
+    missing a commented template is written to that path.
 
 ## ENVIRONMENT
 

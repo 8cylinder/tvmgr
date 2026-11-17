@@ -8,17 +8,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
-DEFAULT_NETWORKS = ["192.168.0.0/24", "192.168.1.0/24"]
-
 
 def discover_kodi(
-    networks: list[str] | str | None = None,
+    networks: list[str] | str,
     timeout: float = 0.5,
 ) -> list[str]:
     """Scan one or more networks for Kodi devices."""
-    if networks is None:
-        networks = DEFAULT_NETWORKS
-
     if isinstance(networks, str):
         networks = [networks]
 

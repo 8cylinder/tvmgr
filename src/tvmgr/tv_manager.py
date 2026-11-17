@@ -56,8 +56,7 @@ class SmbUnavailableError(RuntimeError):
 class ShowFile:
     """Mimic smbc's API for local file actions."""
 
-    def __init__(self, filename: str, paths: PathsConfig | None = None) -> None:
-        paths = paths or PathsConfig()
+    def __init__(self, filename: str, paths: PathsConfig) -> None:
         parsed = urlparse(filename).path
         parsed = parsed.replace(paths.smbc_drive, paths.mount_base)
         self.p = Path(parsed)

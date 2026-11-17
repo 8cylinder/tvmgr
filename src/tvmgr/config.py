@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 import tomllib
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -13,17 +13,43 @@ import platformdirs
 
 APP_NAME = "tvmgr"
 
-DEFAULT_KEEP_LIST = ("Deadwood", "Rick and Morty")
-DEFAULT_KODI_PORT = 8080
-DEFAULT_KODI_USERNAME = "kodi"
-DEFAULT_KODI_PASSWORD = ""
-DEFAULT_SMB_USERNAME = "sm"
-DEFAULT_SMB_PASSWORD = "Password123"
-DEFAULT_SMB_WORKGROUP = ""
-DEFAULT_SMBC_DRIVE = "/Volume_1"
-DEFAULT_MOUNT_BASE = "/home/sm/net1"
-DEFAULT_NETWORKS = ("192.168.0.0/24", "192.168.1.0/24")
-DEFAULT_DISCOVER_TIMEOUT = 0.5
+CONFIG_TEMPLATE = """\
+# tvmgr configuration file.
+#
+# Every value below is required. Uncomment each setting, fill it in, then
+# re-run the command. Run `tvmgr --config` to print this file's path.
+
+# Titles that must never be deleted, even when Kodi reports them as watched.
+# keep_list = ["Deadwood", "Rick and Morty"]
+
+[kodi]
+# Port of Kodi's JSON-RPC API (Kodi's own default is 8080).
+# port = 8080
+# Username and password for Kodi's HTTP API. Use an empty password when Kodi
+# does not require one.
+# username = "kodi"
+# password = ""
+
+[smb]
+# Credentials for the SMB share that holds the media.
+# username = "sm"
+# password = "Password123"
+# Workgroup or domain of the SMB server. Use an empty string to fall back to
+# the workgroup the server advertises.
+# workgroup = ""
+
+[paths]
+# The SMB share path as Kodi reports it, and the local directory it is
+# mounted at. Used by the --mount access mode.
+# smbc_drive = "/Volume_1"
+# mount_base = "/home/sm/net1"
+
+[discover]
+# Networks scanned by `tvmgr discover`, in CIDR notation.
+# networks = ["192.168.0.0/24", "192.168.1.0/24"]
+# Seconds to wait for each host to accept a TCP connection.
+# timeout = 0.5
+"""
 
 
 class ConfigError(Exception):
@@ -34,50 +60,66 @@ class ConfigError(Exception):
 class KodiConfig:
     """Settings used to talk to Kodi."""
 
-    port: int = DEFAULT_KODI_PORT
-    username: str = DEFAULT_KODI_USERNAME
-    password: str = DEFAULT_KODI_PASSWORD
+    port: int
+    username: str
+    password: str
 
 
 @dataclass(frozen=True)
 class SmbConfig:
     """Settings used for SMB authentication."""
 
-    username: str = DEFAULT_SMB_USERNAME
-    password: str = DEFAULT_SMB_PASSWORD
-    workgroup: str = DEFAULT_SMB_WORKGROUP
+    username: str
+    password: str
+    workgroup: str
 
 
 @dataclass(frozen=True)
 class PathsConfig:
     """Path mapping used by the mount access mode."""
 
-    smbc_drive: str = DEFAULT_SMBC_DRIVE
-    mount_base: str = DEFAULT_MOUNT_BASE
+    smbc_drive: str
+    mount_base: str
 
 
 @dataclass(frozen=True)
 class DiscoverConfig:
-    """Defaults for the discover command."""
+    """Settings for the discover command."""
 
-    networks: tuple[str, ...] = DEFAULT_NETWORKS
-    timeout: float = DEFAULT_DISCOVER_TIMEOUT
+    networks: tuple[str, ...]
+    timeout: float
 
 
 @dataclass(frozen=True)
 class Config:
     """The complete tvmgr configuration."""
 
-    keep_list: tuple[str, ...] = DEFAULT_KEEP_LIST
-    kodi: KodiConfig = field(default_factory=KodiConfig)
-    smb: SmbConfig = field(default_factory=SmbConfig)
-    paths: PathsConfig = field(default_factory=PathsConfig)
-    discover: DiscoverConfig = field(default_factory=DiscoverConfig)
+    keep_list: tuple[str, ...]
+    kodi: KodiConfig
+    smb: SmbConfig
+    paths: PathsConfig
+    discover: DiscoverConfig
 
 
 def config_path() -> Path:
     """Return the platform-specific path to the configuration file."""
     return Path(platformdirs.user_config_dir(APP_NAME)) / "config.toml"
+
+
+def write_config_template(path: Path) -> None:
+    """Write a commented configuration template to ``path``.
+
+    The file may hold credentials, so it is created with owner-only
+    permissions.
+    """
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(CONFIG_TEMPLATE, encoding="utf-8")
+        path.chmod(0o600)
+    except OSError as exc:
+        raise ConfigError(
+            f"cannot write config template {path}: {exc}"
+        ) from exc
 
 
 def _default_warn(message: str) -> None:
@@ -107,38 +149,37 @@ def _table(
     return value
 
 
-def _string(value: object, path: Path, key: str, default: str) -> str:
+def _missing(path: Path, key: str) -> ConfigError:
+    return ConfigError(f"{path}: missing required key {key!r}")
+
+
+def _string(value: object, path: Path, key: str) -> str:
     if value is None:
-        return default
+        raise _missing(path, key)
     if not isinstance(value, str):
         raise ConfigError(f"{path}: {key!r} must be a string")
     return value
 
 
-def _integer(value: object, path: Path, key: str, default: int) -> int:
+def _integer(value: object, path: Path, key: str) -> int:
     if value is None:
-        return default
+        raise _missing(path, key)
     if isinstance(value, bool) or not isinstance(value, int):
         raise ConfigError(f"{path}: {key!r} must be an integer")
     return value
 
 
-def _number(value: object, path: Path, key: str, default: float) -> float:
+def _number(value: object, path: Path, key: str) -> float:
     if value is None:
-        return default
+        raise _missing(path, key)
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ConfigError(f"{path}: {key!r} must be a number")
     return float(value)
 
 
-def _string_list(
-    value: object,
-    path: Path,
-    key: str,
-    default: tuple[str, ...],
-) -> tuple[str, ...]:
+def _string_list(value: object, path: Path, key: str) -> tuple[str, ...]:
     if value is None:
-        return default
+        raise _missing(path, key)
     if not isinstance(value, list) or not all(
         isinstance(item, str) for item in value
     ):
@@ -157,12 +198,28 @@ def load_config(
     path: Path | None = None,
     warn: Callable[[str], None] | None = None,
 ) -> Config:
-    """Load the configuration file, returning defaults when it is missing."""
+    """Load the configuration file.
+
+    There are no built-in defaults, so a missing file is an error. A
+    commented template is written to the expected location first so the
+    required values can be filled in.
+    """
     warn = warn or _default_warn
     path = path or config_path()
 
     if not path.exists():
-        return Config()
+        try:
+            write_config_template(path)
+        except ConfigError as exc:
+            raise ConfigError(
+                f"config file not found: {path}\n"
+                f"run `tvmgr --config` to print the expected path"
+            ) from exc
+        raise ConfigError(
+            f"config file not found: {path}\n"
+            f"created a template there; fill in the required values "
+            f"and run again"
+        )
 
     try:
         with path.open("rb") as handle:
@@ -189,73 +246,36 @@ def load_config(
     discover = _table(data, "discover", path, warn)
     _unknown_keys(discover, {"networks", "timeout"}, "discover", path, warn)
 
-    smbc_drive = _resolve_path(
-        _string(
-            paths.get("smbc_drive"),
-            path,
-            "paths.smbc_drive",
-            DEFAULT_SMBC_DRIVE,
-        ),
-        path,
+    keep_list = _string_list(data.get("keep_list"), path, "keep_list")
+    kodi_config = KodiConfig(
+        port=_integer(kodi.get("port"), path, "kodi.port"),
+        username=_string(kodi.get("username"), path, "kodi.username"),
+        password=_string(kodi.get("password"), path, "kodi.password"),
     )
-    mount_base = _resolve_path(
-        _string(
-            paths.get("mount_base"),
-            path,
-            "paths.mount_base",
-            DEFAULT_MOUNT_BASE,
+    smb_config = SmbConfig(
+        username=_string(smb.get("username"), path, "smb.username"),
+        password=_string(smb.get("password"), path, "smb.password"),
+        workgroup=_string(smb.get("workgroup"), path, "smb.workgroup"),
+    )
+    paths_config = PathsConfig(
+        smbc_drive=_resolve_path(
+            _string(paths.get("smbc_drive"), path, "paths.smbc_drive"), path
         ),
-        path,
+        mount_base=_resolve_path(
+            _string(paths.get("mount_base"), path, "paths.mount_base"), path
+        ),
+    )
+    discover_config = DiscoverConfig(
+        networks=_string_list(
+            discover.get("networks"), path, "discover.networks"
+        ),
+        timeout=_number(discover.get("timeout"), path, "discover.timeout"),
     )
 
     return Config(
-        keep_list=_string_list(
-            data.get("keep_list"), path, "keep_list", DEFAULT_KEEP_LIST
-        ),
-        kodi=KodiConfig(
-            port=_integer(
-                kodi.get("port"), path, "kodi.port", DEFAULT_KODI_PORT
-            ),
-            username=_string(
-                kodi.get("username"),
-                path,
-                "kodi.username",
-                DEFAULT_KODI_USERNAME,
-            ),
-            password=_string(
-                kodi.get("password"),
-                path,
-                "kodi.password",
-                DEFAULT_KODI_PASSWORD,
-            ),
-        ),
-        smb=SmbConfig(
-            username=_string(
-                smb.get("username"), path, "smb.username", DEFAULT_SMB_USERNAME
-            ),
-            password=_string(
-                smb.get("password"), path, "smb.password", DEFAULT_SMB_PASSWORD
-            ),
-            workgroup=_string(
-                smb.get("workgroup"),
-                path,
-                "smb.workgroup",
-                DEFAULT_SMB_WORKGROUP,
-            ),
-        ),
-        paths=PathsConfig(smbc_drive=smbc_drive, mount_base=mount_base),
-        discover=DiscoverConfig(
-            networks=_string_list(
-                discover.get("networks"),
-                path,
-                "discover.networks",
-                DEFAULT_NETWORKS,
-            ),
-            timeout=_number(
-                discover.get("timeout"),
-                path,
-                "discover.timeout",
-                DEFAULT_DISCOVER_TIMEOUT,
-            ),
-        ),
+        keep_list=keep_list,
+        kodi=kodi_config,
+        smb=smb_config,
+        paths=paths_config,
+        discover=discover_config,
     )

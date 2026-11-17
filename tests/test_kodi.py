@@ -2,8 +2,8 @@ from unittest.mock import Mock
 
 import pytest
 import requests
+from conftest import make_config
 
-from tvmgr.config import Config
 from tvmgr.kodi import (
     KodiError,
     _format_version,
@@ -32,7 +32,7 @@ def test_get_watched_media_tv(monkeypatch):
     get = Mock(return_value=response)
     monkeypatch.setattr("tvmgr.kodi.requests.get", get)
 
-    result = get_watched_media("1.2.3.4", True, Config())
+    result = get_watched_media("1.2.3.4", True, make_config())
 
     assert result == [("smb://server/one.mkv", "Show")]
     endpoint, payload = get.call_args.args
@@ -56,7 +56,7 @@ def test_get_watched_media_movies(monkeypatch):
     get = Mock(return_value=response)
     monkeypatch.setattr("tvmgr.kodi.requests.get", get)
 
-    assert get_watched_media("1.2.3.4", False, Config()) == [
+    assert get_watched_media("1.2.3.4", False, make_config()) == [
         ("smb://server/movie.mkv", "Movie")
     ]
     assert "VideoLibrary.GetMovies" in get.call_args.args[1]["request"]
@@ -68,7 +68,7 @@ def test_get_watched_media_connection_error(monkeypatch):
         Mock(side_effect=requests.exceptions.ConnectionError()),
     )
     with pytest.raises(KodiError, match="network is unreachable"):
-        get_watched_media("1.2.3.4", True, Config())
+        get_watched_media("1.2.3.4", True, make_config())
 
 
 @pytest.mark.parametrize(
@@ -85,7 +85,7 @@ def test_get_watched_media_bad_response(monkeypatch, payload):
         Mock(return_value=_response(payload)),
     )
     with pytest.raises(KodiError, match="unexpected response"):
-        get_watched_media("1.2.3.4", True, Config())
+        get_watched_media("1.2.3.4", True, make_config())
 
 
 def test_get_watched_media_invalid_json(monkeypatch):
@@ -93,7 +93,7 @@ def test_get_watched_media_invalid_json(monkeypatch):
     response.json.side_effect = ValueError("bad json")
     monkeypatch.setattr("tvmgr.kodi.requests.get", Mock(return_value=response))
     with pytest.raises(KodiError, match="unexpected response"):
-        get_watched_media("1.2.3.4", True, Config())
+        get_watched_media("1.2.3.4", True, make_config())
 
 
 def test_query_kodi_success(monkeypatch):
@@ -101,7 +101,7 @@ def test_query_kodi_success(monkeypatch):
     post = Mock(return_value=response)
     monkeypatch.setattr("tvmgr.kodi.requests.post", post)
 
-    assert _query_kodi(Config(), "1.2.3.4", "Method", {"a": 1}) == {
+    assert _query_kodi(make_config(), "1.2.3.4", "Method", {"a": 1}) == {
         "name": "Kodi"
     }
     post.assert_called_once()
@@ -114,7 +114,7 @@ def test_query_kodi_failure(monkeypatch):
         "tvmgr.kodi.requests.post",
         Mock(side_effect=requests.exceptions.Timeout()),
     )
-    assert _query_kodi(Config(), "1.2.3.4", "Method", {}) is None
+    assert _query_kodi(make_config(), "1.2.3.4", "Method", {}) is None
 
 
 def test_get_kodi_info_full(monkeypatch):
@@ -137,7 +137,7 @@ def test_get_kodi_info_full(monkeypatch):
         return responses[method]
 
     monkeypatch.setattr("tvmgr.kodi._query_kodi", fake_query)
-    info = get_kodi_info("1.2.3.4", Config())
+    info = get_kodi_info("1.2.3.4", make_config())
 
     assert info["url"] == "http://1.2.3.4:8080"
     assert info["system"]["name"] == "Living Room"
@@ -161,7 +161,7 @@ def test_get_kodi_info_idle_and_no_data(monkeypatch):
         return None
 
     monkeypatch.setattr("tvmgr.kodi._query_kodi", fake_query)
-    info = get_kodi_info("1.2.3.4", Config())
+    info = get_kodi_info("1.2.3.4", make_config())
 
     assert info["system"] == {}
     assert info["library"] == {"tv_shows": 0, "movies": 0, "episodes": 0}
@@ -174,7 +174,7 @@ def test_get_kodi_info_error(monkeypatch):
         "tvmgr.kodi._query_kodi",
         Mock(side_effect=RuntimeError("boom")),
     )
-    info = get_kodi_info("1.2.3.4", Config())
+    info = get_kodi_info("1.2.3.4", make_config())
     assert info["error"] == "boom"
 
 

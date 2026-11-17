@@ -2,9 +2,10 @@ from io import StringIO
 from types import SimpleNamespace
 
 import pytest
+from conftest import make_config
 from rich.console import Console
 
-from tvmgr.config import Config, PathsConfig, SmbConfig
+from tvmgr.config import PathsConfig, SmbConfig
 from tvmgr.tv_manager import (
     ShowFile,
     SmbUnavailableError,
@@ -108,7 +109,7 @@ def test_make_auth_fn_uses_config():
 
 
 def test_make_auth_fn_uses_callback_workgroup_when_unset():
-    auth = make_auth_fn(SmbConfig())
+    auth = make_auth_fn(make_config().smb)
     assert (
         auth("server", "share", "CALLBACK", "ignored", "ignored")[0]
         == "CALLBACK"
@@ -119,7 +120,7 @@ def test_delete_files_requires_smbc(monkeypatch):
     monkeypatch.setattr("tvmgr.tv_manager.smbc", None)
     ui, _, _ = _ui()
     with pytest.raises(SmbUnavailableError, match="pysmbc"):
-        delete_files([], False, False, True, False, Config(), ui)
+        delete_files([], False, False, True, False, make_config(), ui)
 
 
 def test_delete_files_lists_and_deletes(monkeypatch):
@@ -134,7 +135,7 @@ def test_delete_files_lists_and_deletes(monkeypatch):
         real=True,
         use_smbc=True,
         verbose=True,
-        config=Config(),
+        config=make_config(),
         ui=ui,
     )
 
@@ -158,7 +159,7 @@ def test_delete_files_keep_list_verbose(monkeypatch):
         real=False,
         use_smbc=True,
         verbose=True,
-        config=Config(keep_list=("Deadwood",)),
+        config=make_config(keep_list=("Deadwood",)),
         ui=ui,
     )
     assert "skipping:" in out.getvalue()
@@ -186,7 +187,7 @@ def test_delete_files_missing_variants(monkeypatch, exception, message):
         real=False,
         use_smbc=True,
         verbose=False,
-        config=Config(),
+        config=make_config(),
         ui=ui,
     )
     assert message in err.getvalue()
@@ -203,7 +204,7 @@ def test_delete_files_hides_missing(monkeypatch):
         real=False,
         use_smbc=True,
         verbose=False,
-        config=Config(),
+        config=make_config(),
         ui=ui,
     )
     assert "(A)" not in err.getvalue()
@@ -222,7 +223,7 @@ def test_delete_files_permission_stops(monkeypatch):
         real=False,
         use_smbc=True,
         verbose=False,
-        config=Config(),
+        config=make_config(),
         ui=ui,
     )
     assert "permission" in err.getvalue()
@@ -233,7 +234,7 @@ def test_delete_files_mount_mode(tmp_path):
     target.parent.mkdir()
     target.write_text("12345")
     ui, out, _ = _ui()
-    config = Config(
+    config = make_config(
         paths=PathsConfig(smbc_drive="/Volume_1", mount_base=str(tmp_path))
     )
 
@@ -271,7 +272,7 @@ def test_walk_bottom_up(tmp_path):
 def test_delete_files_mount_mode_missing_without_smbc(monkeypatch, tmp_path):
     monkeypatch.setattr("tvmgr.tv_manager.smbc", None)
     ui, _, err = _ui()
-    config = Config(
+    config = make_config(
         paths=PathsConfig(smbc_drive="/Volume_1", mount_base=str(tmp_path))
     )
 
